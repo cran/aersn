@@ -1,0 +1,111 @@
+---
+title: "Reference distributions and reproducibility"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Reference distributions and reproducibility}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6,
+                      fig.height = 3.5)
+```
+
+The reference law of the increment-hull gauge is
+$T_q = \gamma_{K(\mathbb B_q)}\{B_q(1)\}$, the gauge of the increment hull
+of a standard $q$-dimensional Brownian bridge evaluated at its independent
+Brownian endpoint.  It depends on the dimension $q$ but not on the long-run
+covariance matrix: the same matrix multiplies the estimation error and the
+normalizing set and cancels from the gauge.  Serial dependence therefore
+enters only through the asymptotic approximation, not through the reference
+law.
+
+## Closed-form scalar law
+
+For $q = 1$, $T_1 = |Z|/R$ with $Z$ standard normal and $R$ the range of an
+independent Brownian bridge.  Its distribution function is
+$\Pr(|M| \le c) = c - 2c^3\sum_{k\ge1}(c^2 + 4k^2)^{-3/2}$; the package
+evaluates it through an exponentially convergent Bessel-function
+representation and cross-checks the two forms in its tests.
+
+```{r}
+library(aersn)
+aersn_scalar_quantile(c(0.90, 0.95, 0.99))
+curve(aersn_scalar_density(x), -4, 4, ylab = "density of M = Z / R")
+```
+
+## Matched-grid references
+
+For a sample of size `n`, the manuscript uses quantiles of the statistic
+computed from a Brownian bridge on the same grid of `n` intervals.  The
+finite-grid gauge decreases to the continuous-path gauge as the grid is
+refined, so matched-grid quantiles are larger:
+
+```{r}
+sapply(c(50, 200, 1000), function(n)
+  aersn_critical_value(aersn_reference(1, n = n, draws = 20000, seed = 1)))
+aersn_scalar_quantile(0.95)
+```
+
+For $q \ge 2$ the law is simulated with the same linear program used for
+the sample statistic.  Every setting that changes the law is part of the
+object: dimension, grid (uniform `n` or profile nodes), number of draws,
+seed, chunk size and solver settings.  Draws are generated in fixed-size
+chunks with chunk-specific seeds, so the result is reproducible for a given
+seed and does not depend on the number of cores.
+
+```{r}
+r1 <- aersn_reference(2, n = 100, draws = 2000, seed = 5)
+r2 <- aersn_reference(2, n = 100, draws = 2000, seed = 5)
+identical(r1$draws, r2$draws)
+r1
+```
+
+Monte Carlo standard errors of quantiles are estimated from interleaved
+batches; two-sided p-values report a standard error and a resolution of one
+over the number of draws. Scalar one-sided tails use symmetry and have half
+that resolution. `aersn_pvalue()` also reports a 95 percent binomial interval
+for the reference tail probability, so zero exceedances need not be interpreted
+as a zero true probability. Increase `draws` when a decision is borderline.
+The reported rejection decision compares the statistic to the interpolated
+quantile; empirical p-values can differ at the boundary by a Monte Carlo
+resolution unit.
+
+A profile grid needs at least `q + 1` positive increments. Flat segments are
+allowed when this condition holds. Numerical failures stop the simulation;
+failed draws are not removed to estimate quantiles. Grid matching approximates
+the Brownian reference law and does not make dependent-data inference
+finite-sample exact.
+
+## Matching statistics and references
+
+`aersn_test()`, `confint()` and `aersn_region()` refuse a reference object
+that was simulated for a different dimension, grid size or profile:
+
+```{r, error = TRUE}
+set.seed(1)
+fit <- aersn_mean(matrix(rnorm(300), 150, 2))
+aersn_test(fit, reference = r1)
+```
+
+## The verified registry
+
+`aersn_registry` contains matched-grid quantiles from the manuscript's
+replication package (30,000 draws for $q \ge 2$, 2,000,000 for $q = 1$),
+with batch Monte Carlo standard errors.  The package tests compare their
+own simulations with these values.  They can also be used directly as a
+tabulated reference for the available `(q, n)` pairs:
+
+```{r}
+subset(aersn_registry, prob == 0.95)
+fit200 <- aersn_mean(matrix(rnorm(400), 200, 2))
+aersn_test(fit200, reference = "registry")
+```
+
+## Caching
+
+References are cached within the session by their full key, including `batches`;
+`aersn_clear_cache()` empties the cache.  Objects can be saved with
+`saveRDS()` and reused across sessions; they record the package version,
+seed and settings used to create them.

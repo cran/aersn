@@ -1,0 +1,85 @@
+---
+title: "Linear regression and smooth GMM"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Linear regression and smooth GMM}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6,
+                      fig.height = 5)
+```
+
+This vignette (synthetic data) shows the two estimating-equation
+interfaces.  Both compute influence contributions and pass them to the
+same core construction, `aersn()`.
+
+## Linear regression
+
+For OLS with regressors $z_t$ and residuals $\hat u_t$, the influence
+contribution of observation $t$ to the coefficient vector is
+$\hat Q^{-1} z_t \hat u_t$ with $\hat Q = n^{-1}\sum_t z_t z_t^\top$.  The
+intercept and any control coefficients are estimated jointly; their effect
+on the contributions of the coefficients of interest is retained.
+
+```{r}
+library(aersn)
+set.seed(21)
+n <- 300
+x1 <- as.numeric(arima.sim(list(ar = 0.6), n))
+x2 <- as.numeric(arima.sim(list(ar = 0.3), n))
+u <- as.numeric(arima.sim(list(ar = 0.5), n))
+y <- 1 + 0.8 * x1 - 0.4 * x2 + u
+fit <- aersn_lm(y ~ x1 + x2, target = c("x1", "x2"))
+fit
+ref <- aersn_reference(fit, draws = 4000, seed = 1)
+aersn_test(fit, null = c(0.8, -0.4), reference = ref)
+confint(fit, reference = ref)
+plot(fit, reference = ref, null = c(0.8, -0.4))
+```
+
+A fitted `lm` object can be passed instead of a formula.  Weighted least
+squares and aliased coefficients are not supported.
+
+## Smooth GMM
+
+`aersn_gmm()` takes the moment contributions $m_t(\hat\beta_n)$, the average
+Jacobian $\hat D = n^{-1}\sum_t \partial m_t(\hat\beta_n)/\partial\beta^\top$,
+the weighting matrix $\hat W$, and the estimate.  It forms
+$\hat M = (\hat D^\top\hat W\hat D)^{-1}\hat D^\top\hat W$ and the
+contributions $\hat\psi_{n,t} = -\hat{\dot h}_n\hat M m_t(\hat\beta_n)$ for the
+target $h(\beta)$.  The function warns when the first-order condition
+$\hat D^\top\hat W\bar m_n$ is not close to zero, which indicates that the
+supplied estimate does not solve the GMM problem.
+
+Two-stage least squares with two instruments for one endogenous regressor:
+
+```{r}
+set.seed(22)
+z1 <- rnorm(n); z2 <- rnorm(n); v <- rnorm(n)
+x <- z1 + 0.5 * z2 + v
+y <- 1 + x + 0.6 * v + rnorm(n)
+Z <- cbind(1, z1, z2); X <- cbind(1, x)
+W <- solve(crossprod(Z) / n)
+Dm <- -crossprod(Z, X) / n
+gZy <- crossprod(Z, y) / n
+beta <- -solve(t(Dm) %*% W %*% Dm, t(Dm) %*% W %*% gZy)   # 2SLS
+moments <- Z * as.numeric(y - X %*% beta)
+gmm <- aersn_gmm(moments, Dm, beta, weight = W, target = 2, names = "slope")
+gmm
+aersn_test(gmm, null = 1, draws = 20000, seed = 1)
+```
+
+## Conditions
+
+The sufficient conditions are those of the manuscript's Assumption
+"Sufficient conditions for smooth GMM": a stationary ergodic moment
+process, $\sqrt n$-consistency, full column rank of the population Jacobian,
+consistent Jacobian and weighting matrix, smooth moments, and a joint
+functional central limit theorem for the moments and their Jacobian.
+Under these conditions the path based on the estimated contributions is
+uniformly equivalent to the path based on the true influence function, so
+the hull-based inference is valid.  Non-smooth moments (quantile
+regression) and nonstandard rates are outside this scope.

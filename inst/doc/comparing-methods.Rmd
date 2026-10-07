@@ -1,0 +1,230 @@
+---
+title: "Comparing inference methods on one estimate"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Comparing inference methods on one estimate}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6,
+                      fig.height = 5)
+```
+
+The package computes inference for a fixed-dimensional time-series parameter
+by six methods.  All of them start from the same estimate and the same
+observation-level influence contributions, so a difference between their
+answers comes from the normalizer and its reference law, not from a
+difference in the setup.  This vignette shows how to run them, how to read
+the comparison table, and how to change the tuning values that four of them
+require.  The data are **synthetic** throughout.
+
+The default method is the affine-equivariant adjusted-range increment hull,
+which is the subject of the package's main reference.  The other five are
+provided so that it can be compared with methods already in use.
+
+## The six methods
+
+| `method` | Normalizer | Tuning | Reference law |
+|---|---|---|---|
+| `"hull"` | increment hull of the centered influence path | none | simulated Brownian gauge law |
+| `"ldl"` | componentwise adjusted ranges after lag-zero prewhitening | coordinate order | simulated independent-component law |
+| `"shao"` | integrated outer product of the path | integration rule | simulated Brownian quadratic law |
+| `"hac"` | kernel long-run covariance estimate | kernel, bandwidth | chi-squared |
+| `"fixedb"` | Bartlett estimate with bandwidth fraction *b* | *b* | simulated fixed-b law |
+| `"ewc"` | equal-weighted cosine (EWC) estimate | number of terms | scaled F |
+
+The first three are self-normalized: the normalizer has a nondegenerate
+random limit, the unknown long-run covariance cancels, and no smoothing
+parameter is chosen.  `"hac"` estimates the long-run covariance matrix
+consistently and uses the usual chi-squared reference.  `"fixedb"` and
+`"ewc"` use reference laws derived by holding their smoothing parameter
+fixed as the sample grows, retaining the randomness of the covariance
+estimate. For EWC, the default number of terms increases with sample size;
+the scaled F reference uses the selected number at each sample size.  HAC
+stands for heteroskedasticity and autocorrelation consistent; HAR, as in the
+EWC literature, stands for heteroskedasticity and autocorrelation robust.
+
+## One estimate, six answers
+
+```{r}
+library(aersn)
+set.seed(2026)
+n <- 400
+e <- matrix(rnorm(2 * n), n, 2)
+Y <- e
+for (t in 2:n) Y[t, ] <- 0.5 * Y[t - 1, ] + e[t, ]
+Y <- sweep(Y, 2, c(0.12, -0.05), `+`)
+
+fit <- aersn_mean(Y, names = c("m1", "m2"))
+fit
+```
+
+`aersn_compare()` runs the methods on the same null value and level:
+
+```{r}
+cmp <- aersn_compare(fit, null = c(0, 0), draws = 2000, seed = 1)
+cmp
+```
+
+Read the table by column.  The `statistic` and `critical_value` columns are
+**not** comparable across rows: the hull statistic is a gauge, homogeneous of
+degree one in the estimation error, and the other five are Wald statistics,
+homogeneous of degree two.  Each is referred to its own law, so their
+magnitudes have different units.  The columns that can be compared are
+`p_value`, `reject` and `half_width`, the last being the half-width of the
+interval for the first coordinate.  The `tuning` column records the values
+actually used, including any that were selected from the data or rounded.
+
+The same information is available one method at a time:
+
+```{r}
+aersn_test(fit, null = c(0, 0), method = "shao", draws = 2000, seed = 1)
+aersn_test(fit, null = c(0, 0), method = "hac", kernel = "Parzen",
+           bandwidth = "andrews")
+```
+
+## Intervals, contrasts and regions
+
+Every method supports the same inference objects.  The three interval types
+keep their meaning: `"simultaneous"` projects the joint region and holds for
+all linear contrasts at once, `"joint"` treats the selected contrasts as a
+lower-dimensional problem, and `"marginal"` builds a separate one-dimensional
+interval per coordinate without simultaneous coverage.
+
+```{r}
+confint(fit, method = "ewc")
+aersn_contrast(fit, rbind("m1 - m2" = c(1, -1)), method = "fixedb", b = 0.5,
+               draws = 2000, seed = 1)
+```
+
+Inference on a target is carried out by rebuilding the method on the target's
+influence contributions.  For the hull, and for any method whose normalizer
+is a linear functional of outer products, this agrees with transforming the
+full-dimensional normalizer.  It differs where the method itself is not
+linear in that sense: the LDL factorization is recomputed for the target, and
+an automatic HAC bandwidth is selected again from the target's contributions.
+
+Confidence regions keep the geometry of their method.  The hull region is a
+convex polygon in two dimensions; the other five are ellipsoids.
+
+```{r, fig.height = 3.4, fig.width = 7}
+op <- par(mfrow = c(1, 2), mar = c(4, 4, 2, 1))
+plot(aersn_region(fit, method = "hull", draws = 2000, seed = 1),
+     null = c(0, 0), main = "Increment hull")
+plot(aersn_region(fit, method = "shao", draws = 2000, seed = 1),
+     null = c(0, 0), main = "Quadratic self-normalization")
+par(op)
+```
+
+## Changing the tuning values
+
+Four methods need a tuning value.  The package reports the value it used
+rather than only the value requested, which matters when a rule selects from
+the data or when a fraction is rounded to an integer lag.
+
+### HAC kernel and bandwidth
+
+Three kernels are available, with five ways to set the bandwidth.
+
+```{r}
+grid <- expand.grid(kernel = c("Bartlett", "Parzen", "Quadratic Spectral"),
+                    rule = c("short", "long", "andrews", "newey-west"),
+                    stringsAsFactors = FALSE)
+for (i in seq_len(nrow(grid))) {
+  out <- tryCatch({
+    nz <- aersn_hac_lrv(fit, kernel = grid$kernel[i],
+                        bandwidth = grid$rule[i])
+    sprintf("bandwidth %6.3f, lag %s", nz$tuning$bandwidth,
+            nz$tuning$lag_truncation)
+  }, error = function(e) "not supported")
+  cat(sprintf("%-20s %-12s %s\n", grid$kernel[i], grid$rule[i], out))
+}
+```
+
+The Newey-West rule follows `sandwich::NeweyWest()`, which applies Bartlett
+weights with bandwidth `floor(bw) + 1`; it is therefore offered for
+the Bartlett kernel only, and the other kernels report that rather than
+quietly substituting a different rule.  A numeric bandwidth, or a lag
+truncation for the two compactly supported kernels, can be given directly:
+
+```{r}
+aersn_hac_lrv(fit, kernel = "Bartlett", lag = 8)$tuning[c("bandwidth",
+                                                          "lag_truncation")]
+```
+
+Three quantities are easy to confuse and are kept distinct: the real-valued
+bandwidth *h* in the weight `w(lag/h)`; the lag truncation *L*, which for the
+Bartlett kernel corresponds to `h = L + 1`; and the fixed-b fraction, which
+is a third parameterisation.
+
+### The fixed-b fraction
+
+The bandwidth in grid intervals must be a whole number, so the fraction actually used is
+`round(b n) / n`:
+
+```{r}
+for (b in c(0.2, 0.5, 0.7, 0.9, 1)) {
+  nz <- aersn_fixed_b_normalizer(fit, b = b)
+  cat(sprintf("requested b = %.2f -> m = %3d, realized b = %.4f\n",
+              b, nz$tuning$m, nz$tuning$b_grid))
+}
+```
+
+Each fraction has its own reference law, keyed by the realized value, so a
+law simulated for one *b* cannot be used with another.  At `b = 1` the
+estimate is exactly twice the quadratic self-normalizer, the statistic is
+exactly half the quadratic statistic, and the two tests agree:
+
+```{r}
+max(abs(aersn_fixed_b_normalizer(fit, b = 1)$matrix -
+          2 * aersn_shao_normalizer(fit)$matrix))
+```
+
+### The number of cosine terms
+
+```{r}
+aersn_ewc_lrv(fit)$tuning[c("nu", "rule")]
+aersn_test(fit, method = "ewc", nu = 30)$critical.value
+```
+
+The default is `floor(0.4 n^(2/3))`.  Admissible values run from the
+parameter dimension to `n - 1`.  Raising the number of terms lowers the
+critical value, because the reference law moves towards chi-squared, and
+raises the bias of the estimate under strong dependence.
+
+`nu` has its own argument in `aersn_test()` and the other inference
+functions.  Without it, R's partial matching would send `nu = 30` to the
+`null` argument, since `nu` is a prefix of `null`.
+
+## What each method assumes
+
+All six need the influence contributions to satisfy a functional central
+limit theorem with a nonsingular long-run covariance matrix, and the
+estimator to be asymptotically linear in them.  Beyond that:
+
+* The hull needs no further condition and its statistic is unchanged by any
+  nonsingular reparameterization of the parameters.
+* The componentwise method uses a reference law that treats its `q` ratios as
+  independent.  Diagonalizing the sample lag-zero covariance does not
+  diagonalize the long-run covariance, so that law is correct only when the
+  transformed long-run covariance is diagonal in the limit.  The statistic
+  also depends on the order of the coordinates and is not affine equivariant.
+* Quadratic self-normalization integrates in calendar time by default.  Under
+  nonuniform variance accumulation the integration should follow the
+  variance-accumulation profile, which `integration = "profile"` does.
+* HAC inference relies on the bandwidth conditions under which the estimate
+  is consistent; a particular finite-sample bandwidth does not verify them.
+* Fixed-b and EWC reference laws are fixed-smoothing asymptotic laws for
+  dependent data, not exact finite-sample distributions.
+
+The package checks what it can check, such as the dimension, the grid, the
+conditioning of a normalizer and the match between a statistic and its
+reference law.  It cannot check the dependence conditions, and none of the
+methods removes the size distortion that all of them show under strong
+persistence; the manuscript's simulations report it for each.
+
+```{r}
+aersn_normalizer(fit, "ldl")$notes
+```

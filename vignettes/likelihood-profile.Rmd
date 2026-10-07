@@ -1,0 +1,99 @@
+---
+title: "Conditional likelihood scores and variance-accumulation profiles"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Conditional likelihood scores and variance-accumulation profiles}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6,
+                      fig.height = 3.5)
+```
+
+This vignette (synthetic data) shows the conditional-likelihood interface
+and the optional variance-accumulation profile of the manuscript's
+Section 4.
+
+## Fitted scores
+
+For a conditional likelihood with parameter $\beta$, fitted scores
+$s_t(\hat\beta_n)$ and normalized negative Hessian $\hat J_n$, the influence
+contributions of a target $h(\beta)$ are
+$\hat{\dot h}_n\hat J_n^{-1}s_t(\hat\beta_n)$.  Because fitted scores sum to
+zero, the centered path is the same under calendar-time and profile
+centering; a profile changes the grid of the reference distribution.
+
+## Nonuniform information accumulation
+
+Consider a Gaussian regression with known, time-varying error scale
+$\sigma_t = \sigma(t/n)$ that decreases over the sample, so that information
+accumulates faster towards the end.  The true variance-accumulation profile
+is $\tau(r) = \int_0^r \sigma(u)^{-2}du / \int_0^1 \sigma(u)^{-2}du$.
+
+```{r}
+library(aersn)
+set.seed(31)
+n <- 400
+r <- (1:n) / n
+sigma <- exp(1 - 2 * r)                    # scale falls from e^1 to e^-1
+x <- rnorm(n)
+beta0 <- c(0.5, 1)
+X <- cbind(1, x)
+y <- as.numeric(X %*% beta0) + sigma * rnorm(n)
+## weighted least squares = maximum likelihood with known sigma_t
+w <- 1 / sigma^2
+b <- solve(crossprod(X * w, X), crossprod(X * w, y))
+s <- X * as.numeric(y - X %*% b) * w      # conditional scores
+J <- crossprod(X * w, X) / n               # normalized negative Hessian
+tau_true <- c(0, cumsum(w)) / sum(w)
+```
+
+Under correct specification the conditional score variance
+$x_t x_t^\top/\sigma_t^2$ equals the negative expected Hessian, so the two
+cumulative matrices share the profile and the outer-product estimator of
+`aersn_opg_profile()` is justified (Supplement, Proposition "Feasible
+variance-accumulation profile from score outer products").
+
+```{r}
+fit_cal <- aersn_mle(s, J, b, target = 2, names = "slope")
+fit_opg <- aersn_mle(s, J, b, target = 2, names = "slope", profile = "opg")
+plot((0:n) / n, fit_opg$nodes, type = "l", xlab = "sample fraction",
+     ylab = "tau", main = "Estimated (solid) and true (dashed) profile")
+lines((0:n) / n, tau_true, lty = 2)
+abline(0, 1, col = "grey60", lty = 3)
+fit_opg$model$proportionality      # departure from a common scalar profile
+```
+
+The path is identical under the two centerings; the reference grid differs,
+and so does the matched-grid critical value:
+
+```{r}
+all.equal(fit_cal$path$G, fit_opg$path$G)
+ref_cal <- aersn_reference(fit_cal, draws = 20000, seed = 1)
+ref_opg <- aersn_reference(fit_opg, draws = 20000, seed = 1)
+c(calendar = aersn_critical_value(ref_cal), profile = aersn_critical_value(ref_opg))
+aersn_test(fit_opg, null = 1, reference = ref_opg)
+```
+
+For the scalar adjusted range the reference law is unchanged by a monotone
+change of time; only the finite-grid approximation differs between the two
+grids.  A known profile can be supplied instead of `"opg"` as a numeric
+vector of length `n + 1`.
+
+## When a profile should not be used
+
+* The outer-product profile relies on martingale-difference scores; for
+  serially correlated influence contributions, lag-zero outer products do
+  not estimate cumulative long-run covariance.
+* Consistency of a profile estimate alone does not make the profile-centered
+  path feasible for a general estimator: for the sample mean, the fitted
+  contributions sum to zero and the required path differs from the
+  calendar-centered path by $\{\tau(r) - r\}S_n(1)$.  The manuscript
+  establishes feasibility for fitted conditional scores under a common
+  profile; the package does not estimate a valid profile for arbitrary
+  dependent data.
+* The fixed-shape condition $C(r) = \tau(r)C(1)$ excludes changing
+  covariance orientation (Supplement, Remark "Changing covariance
+  orientation").

@@ -1,0 +1,115 @@
+---
+title: "Inference from supplied influence contributions"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Inference from supplied influence contributions}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+The core of the package accepts an estimate and the observation-level
+influence contributions of its asymptotically linear representation.  This
+vignette explains the interface, the conventions, and the conditions that
+must hold for the inference to be valid.  All data are **synthetic**.
+
+## The representation
+
+Let $\hat\theta_n \in \mathbb R^q$ estimate $\theta_0$ from $n$ observations
+in time order, with
+$$\sqrt n(\hat\theta_n - \theta_0) = n^{-1/2}\sum_{t=1}^n \psi_t + o_p(1),$$
+where $\psi_t \in \mathbb R^q$ is the (mean-zero) influence function.  The
+user supplies an estimate $\hat\psi_{n,t}$ of each contribution.  Column $j$
+of the contribution matrix corresponds to coordinate $j$ of `estimate`, and
+`nrow(psi)` must equal the number of observations in the sum.
+
+```{r}
+library(aersn)
+set.seed(3)
+n <- 200
+## A ratio of two means, with the contributions derived by the delta method.
+Y <- cbind(rnorm(n, 2), rnorm(n, 1))
+m <- colMeans(Y)
+ratio <- m[2] / m[1]
+J <- matrix(c(-m[2] / m[1]^2, 1 / m[1]), 1, 2)   # derivative of h(m) = m2 / m1
+psi <- sweep(Y, 2, m) %*% t(J)                     # n x 1 contributions
+fit <- aersn(ratio, psi, n = n, names = "ratio")
+fit
+aersn_test(fit, null = 0.5, draws = 20000, seed = 1)
+```
+
+The same result is obtained by fitting the mean vector and transforming the
+target with `aersn_target()`, which applies the Jacobian to the
+contributions:
+
+```{r}
+fit2 <- aersn_target(aersn_mean(Y), function(b) b[2] / b[1], jacobian = J,
+                     names = "ratio")
+all.equal(fit$psi, fit2$psi, check.attributes = FALSE)
+```
+
+## Conventions made explicit
+
+* **Centering.** The path subtracts $\tau(k/n)$ times the full-sample sum of
+  the contributions at each grid point; under calendar-time centering
+  $\tau(r) = r$.  The path is not demeaned pointwise.
+* **Scaling.** Partial sums are multiplied by $n^{-1/2}$ and the estimation
+  error by $\sqrt n$, with the same `n = nrow(psi)`.
+* **Ordering.** Rows are in time order; the parameter order is that of
+  `estimate`.
+* **Missing values.** Contributions with missing or non-finite values are
+  rejected; nothing is dropped silently.
+
+## Conditions required for validity
+
+The package computes the statistic and its reference law; it cannot verify
+that the conditions of the manuscript hold for a user-supplied estimator.
+Those conditions are (manuscript Assumption 1):
+
+1. **Functional limit.** The partial-sum process of the true contributions,
+   $n^{-1/2}\sum_{t \le \lfloor nr \rfloor}\psi_t$, converges weakly to
+   $A B_q(r)$ with $A$ nonsingular, so the long-run covariance matrix
+   $\Omega = AA^\top$ is positive definite.
+2. **Asymptotic linearity.** The estimation error satisfies the
+   representation above.
+3. **Feasible path.** The increment hull of the path built from the
+   estimated contributions converges in Hausdorff distance to the hull of the
+   path built from the true contributions.  Uniform convergence of the
+   estimated path is sufficient.
+
+Condition 3 is where estimated nuisance parameters matter.  For smooth
+GMM and for conditional likelihood the manuscript verifies it when the
+contributions incorporate the nuisance-parameter effect through the
+Jacobian and the inverse Hessian (see `aersn_gmm()` and `aersn_mle()`).
+Discarding nuisance coordinates from raw moment contributions or scores
+does not give the correct path.
+
+## Nuisance parameters: a concrete illustration
+
+For a regression slope with an estimated intercept, the correct
+contribution is the second element of $\hat Q^{-1} z_t \hat u_t$, not
+$x_t \hat u_t$ alone.  The two differ whenever the regressor is not
+centered:
+
+```{r}
+x <- rnorm(n) + 1
+y <- 1 + 0.5 * x + rnorm(n)
+Z <- cbind(1, x); b <- solve(crossprod(Z), crossprod(Z, y)); u <- as.numeric(y - Z %*% b)
+correct <- ((Z * u) %*% solve(crossprod(Z) / n))[, 2]
+naive <- x * u / mean(x^2)
+c(correct = aersn_gauge(aersn(b[2], correct), 0.5),
+  naive = aersn_gauge(aersn(b[2], naive), 0.5))
+```
+
+`aersn_lm()` and `aersn_gmm()` form the correct contributions
+automatically.
+
+## Effective sample size
+
+The statistic is not invariant to `n`: multiplying the number of rows by a
+constant while keeping the same estimate changes both the path scaling and
+the estimation-error scaling.  Supply exactly the contributions of the
+representation, one per observation.

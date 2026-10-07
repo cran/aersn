@@ -1,0 +1,106 @@
+---
+title: "Multivariate mean inference and linear contrasts"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Multivariate mean inference and linear contrasts}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", fig.width = 6,
+                      fig.height = 5)
+```
+
+This vignette uses **synthetic** data: a trivariate vector autoregression
+with cross-dependence.  It illustrates joint inference on the mean vector,
+the increment-hull confidence region, simultaneous intervals for linear
+contrasts, and the distinction between simultaneous and marginal intervals.
+
+```{r}
+library(aersn)
+set.seed(11)
+n <- 250; q <- 3
+A <- matrix(c(0.4, 0.1, 0, -0.2, 0.3, 0.1, 0, 0.1, 0.5), 3, 3, byrow = TRUE)
+e <- matrix(rnorm(n * q), n, q) %*% chol(matrix(c(1, .5, .2, .5, 1, .3, .2, .3, 1), 3))
+Y <- e
+for (t in 2:n) Y[t, ] <- Y[t - 1, ] %*% t(A) + e[t, ]
+Y <- sweep(Y, 2, c(0, 0.2, -0.1), `+`)
+fit <- aersn_mean(Y, names = c("m1", "m2", "m3"))
+fit
+```
+
+The hull diagnostics report the numerical rank of the centered path (it must
+equal `q`), its condition number, and the minimum projected adjusted range
+over the coordinate axes and 1,000 prespecified directions.
+
+## Joint test and confidence region
+
+```{r}
+ref <- aersn_reference(fit, draws = 4000, seed = 1)   # matched grid, q = 3, n = 250
+ref
+aersn_test(fit, null = c(0, 0, 0), reference = ref)
+reg <- aersn_region(fit, reference = ref)
+reg
+```
+
+The region is $\hat\theta_n + (c/\sqrt n)K(\hat G_n)$, a translated and
+scaled copy of the increment hull.  It is convex and centrally symmetric but
+not an ellipsoid.  Membership of candidate vectors is tested through the
+gauge:
+
+```{r}
+aersn_contains(reg, rbind(c(0, 0, 0), c(0, 0.2, -0.1)))
+```
+
+For three or more parameters, `plot()` shows two-dimensional views: the
+default `type = "projection"` draws the exact projections of the joint
+region onto coordinate planes (simultaneous coverage), while
+`type = "slice"` draws cross-sections through the estimate.
+
+```{r}
+plot(reg, null = c(0, 0, 0))
+```
+
+## Simultaneous intervals for contrasts
+
+Each contrast $a^\top\theta$ has the projection interval
+$a^\top\hat\theta_n \pm (c_q/\sqrt n)\{\max_k a^\top\hat G_{n,k} - \min_k a^\top\hat G_{n,k}\}$,
+which uses the $q$-dimensional critical value and therefore holds
+simultaneously for every linear contrast.
+
+```{r}
+contrasts <- rbind("m2 - m1" = c(-1, 1, 0),
+                   "m3 - m2" = c(0, -1, 1),
+                   "average" = c(1, 1, 1) / 3)
+aersn_contrast(fit, contrasts, reference = ref)
+```
+
+Three interval types are distinguished:
+
+* `type = "simultaneous"` (default): projections of the full joint region,
+  critical value $c_q$;
+* `type = "joint"`: projections of the joint region of the specified
+  contrasts only (dimension $m$), critical value $c_m$; and
+* `type = "marginal"`: separately constructed scalar intervals with $c_1$,
+  which cover each contrast individually and are not simultaneous.
+
+```{r}
+confint(fit, reference = ref)
+confint(fit, type = "marginal", draws = 20000, seed = 1)
+```
+
+A vector can lie inside every marginal interval and still be excluded from
+the joint region, because some linear combination of the coordinates
+violates the joint restriction (manuscript Section 3).
+
+## Affine equivariance
+
+Rescaling, rotating or shearing the data leaves the test statistic
+unchanged and maps the region accordingly:
+
+```{r}
+H <- matrix(c(2, 0.5, 0, -0.3, 1, 0.2, 0, 0, 0.7), 3, 3)
+fitH <- aersn_mean(Y %*% t(H))
+c(original = aersn_gauge(fit, c(0, 0, 0)), transformed = aersn_gauge(fitH, c(0, 0, 0)))
+```

@@ -1,0 +1,60 @@
+citHeader(paste(
+  "To cite the aersn package and its main method, please use the references",
+  "below. The five comparator methods available through the `method`",
+  "argument have their own references, given on the help page of each",
+  "normalizer: aersn_ldl_normalizer, aersn_shao_normalizer, aersn_hac_lrv,",
+  "aersn_fixed_b_normalizer and aersn_ewc_lrv."))
+
+bibentry(
+  bibtype = "TechReport",
+  title   = "Affine-Equivariant Adjusted-Range Self-Normalization",
+  author  = c(person("Yongmiao", "Hong"), person("Zhuo", "Lin"),
+              person("Oliver", "Linton"), person(c("Whitney", "K."), "Newey"),
+              person("Jiajing", "Sun")),
+  year    = "2026",
+  institution = "Faculty of Economics, University of Cambridge",
+  type    = "Cambridge Working Papers in Economics",
+  number  = "2678",
+  note    = "Also issued as Janeway Institute Working Paper No. 2637",
+  url     = "https://www.janeway.econ.cam.ac.uk/publication/affine-equivariant-adjusted-range-self-normalization",
+  textVersion = paste(
+    "Hong, Y., Lin, Z., Linton, O., Newey, W. K. and Sun, J. (2026).",
+    "Affine-Equivariant Adjusted-Range Self-Normalization.",
+    "Cambridge Working Papers in Economics No. 2678;",
+    "Janeway Institute Working Paper No. 2637.",
+    "https://www.janeway.econ.cam.ac.uk/publication/affine-equivariant-adjusted-range-self-normalization")
+)
+
+bibentry(
+  bibtype = "Article",
+  title   = "Kolmogorov--Smirnov type testing for structural breaks: A new adjusted-range based self-normalization approach",
+  author  = c(person("Yongmiao", "Hong"), person("Oliver", "Linton"),
+              person("Brendan", "McCabe"), person("Jiajing", "Sun"),
+              person("Shouyang", "Wang")),
+  journal = "Journal of Econometrics",
+  year    = "2024",
+  volume  = "238",
+  number  = "2",
+  pages   = "105603",
+  doi     = "10.1016/j.jeconom.2023.105603",
+  textVersion = paste(
+    "Hong, Y., Linton, O., McCabe, B., Sun, J. and Wang, S. (2024).",
+    "Kolmogorov-Smirnov type testing for structural breaks: A new",
+    "adjusted-range based self-normalization approach.",
+    "Journal of Econometrics, 238(2), 105603.")
+)
+
+bibentry(
+  bibtype = "Manual",
+  title   = "aersn: Affine-Equivariant Adjusted-Range Self-Normalization for Time-Series Inference",
+  author  = c(person("Yongmiao", "Hong"), person("Zhuo", "Lin"),
+              person("Oliver", "Linton"), person(c("Whitney", "K."), "Newey"),
+              person("Jiajing", "Sun")),
+  year    = "2026",
+  note    = paste("R package version", meta$Version),
+  textVersion = paste(
+    "Hong, Y., Lin, Z., Linton, O., Newey, W. K. and Sun, J. (2026).",
+    "aersn: Affine-Equivariant Adjusted-Range",
+    "Self-Normalization for Time-Series Inference.",
+    paste0("R package version ", meta$Version, "."))
+)
